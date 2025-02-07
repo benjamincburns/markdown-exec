@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mkdocs.config import config_options
-from mkdocs.config.base import Config
+from mkdocs.config.base import BaseConfigOption, Config, ValidationError
 from mkdocs.exceptions import PluginError
 from mkdocs.plugins import BasePlugin
 from mkdocs.utils import write_file
 
 from markdown_exec import formatter, formatters, validator
 from markdown_exec.formatters.jupyter import _shutdown_kernels
+from markdown_exec.hooks import fire_post_session_hooks, hook_formatter
 from markdown_exec.logger import patch_loggers
 from markdown_exec.rendering import MarkdownConverter, markdown_config
 
@@ -49,6 +52,50 @@ def _get_logger(name: str) -> _LoggerAdapter:
 
 patch_loggers(_get_logger)
 
+class Hook(BaseConfigOption[str]):
+    """A config option that validates a hook definition."""
+
+    def __init__(self):
+        """Initialize the config option."""
+        self._default = None
+        super().__init__()
+
+    def run_validation(self, value: object, /) -> str:
+        """Validate the value."""
+        if not isinstance(value, str):
+            msg = f"Expected type: str but received: {type(value)}"
+        elif not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*:[a-zA-Z_][a-zA-Z0-9_]*$", value):
+            msg = (
+                f"Expected a valid hook definition, got: {value}. Valid hook "
+                "definitions are of the form: "
+                "'module_import_string:function_name' (without quotes). For"
+                "example: 'markdown_exec.hooks:pre_session'"
+            )
+        else:
+            module_name, function_name = value.split(":")
+            module = None
+            try:
+                module = importlib.import_module(module_name)
+            except ImportError:
+                msg = (
+                    f"The module {module_name} could not be imported. Please "
+                    "check the spelling of the module import string."
+                )
+            if module is not None and not hasattr(module, function_name):
+                msg = (
+                    f"The function {function_name} could not be found in the module "
+                    f"{module_name}. Please check the spelling of the function name."
+                )
+            elif module is not None:
+                return cast(str, value)
+
+        raise ValidationError(msg)
+
+class LanguageHookConfig(Config):
+    """Defines the set of hooks for a language."""
+    pre_session = config_options.ListOfItems(Hook(), default=[])
+    post_session = config_options.ListOfItems(Hook(), default=[])
+
 
 class MarkdownExecPluginConfig(Config):
     """Configuration of the plugin (for `mkdocs.yml`)."""
@@ -60,7 +107,11 @@ class MarkdownExecPluginConfig(Config):
         default=list(formatters.keys()),
     )
     """Which languages to enabled the extension for."""
-
+    hooks = config_options.DictOfItems(
+        config_options.SubConfig(LanguageHookConfig, validate=True),
+        default={},
+    )
+    """Which hooks to run."""
 
 class MarkdownExecPlugin(BasePlugin[MarkdownExecPluginConfig]):
     """MkDocs plugin to easily enable custom fences for code blocks execution."""
@@ -96,6 +147,14 @@ class MarkdownExecPlugin(BasePlugin[MarkdownExecPluginConfig]):
         superfences = mdx_configs.setdefault("pymdownx.superfences", {})
         custom_fences = superfences.setdefault("custom_fences", [])
         for language in self.languages:
+            if language not in self.config.hooks:
+                self.config.hooks[language] = LanguageHookConfig()
+            print(f"language: {language}")
+            formatters[language] = hook_formatter(
+                formatter=formatters[language],
+                language=language,
+                pre_session_hooks=self.config.hooks[language].pre_session,
+            )
             custom_fences.append(
                 {
                     "name": language,
@@ -121,7 +180,13 @@ class MarkdownExecPlugin(BasePlugin[MarkdownExecPluginConfig]):
             self._add_js(config, "pyodide.js")
         return env
 
-    def on_post_build(self, *, config: MkDocsConfig) -> None:  # noqa: ARG002,D102
+    def on_post_build(self, *, config: MkDocsConfig) -> None:  # noqa: D102, ARG002
+        fire_post_session_hooks(
+            post_session_hooks_by_language={
+                key: hooks.post_session or []
+                for key, hooks in self.config.hooks.items()
+            },
+        )
         MarkdownConverter.counter = 0
         markdown_config.reset()
         if self.mkdocs_config_dir is None:

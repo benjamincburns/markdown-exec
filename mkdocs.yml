@@ -127,6 +127,10 @@ plugins:
 - search
 - markdown-exec:
     ansi: required
+    hooks:
+      python:
+        pre_session:
+        - "markdown_exec.hooks:pre_session_hook"
 - gen-files:
     scripts:
     - scripts/gen_ref_nav.py
