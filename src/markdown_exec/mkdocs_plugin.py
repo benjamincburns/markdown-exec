@@ -181,21 +181,23 @@ class MarkdownExecPlugin(BasePlugin[MarkdownExecPluginConfig]):
             self._add_js(config, "pyodide.js")
         return env
 
-    def on_post_build(self, *, config: MkDocsConfig) -> None:  # noqa: D102, ARG002
+    def on_post_page(self, output: str, **kwargs: Any) -> str:  # noqa: D102, ARG002
         fire_post_session_hooks(
             post_session_hooks_by_language={
                 key: hooks.post_session or []
                 for key, hooks in self.config.hooks.items()
             },
         )
+        _shutdown_kernels()
+        return output
+
+    def on_post_build(self, *, config: MkDocsConfig) -> None:  # noqa: D102, ARG002
         MarkdownConverter.counter = 0
         markdown_config.reset()
         if self.mkdocs_config_dir is None:
             os.environ.pop("MKDOCS_CONFIG_DIR", None)
         else:
             os.environ["MKDOCS_CONFIG_DIR"] = self.mkdocs_config_dir
-
-        _shutdown_kernels()
 
     def _add_asset(self, config: MkDocsConfig, asset_file: str, asset_type: str) -> None:
         asset_filename = f"assets/_markdown_exec_{asset_file}"
