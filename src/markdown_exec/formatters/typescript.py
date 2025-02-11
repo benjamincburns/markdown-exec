@@ -113,13 +113,13 @@ def _run_typescript(
     id: str | None = None,  # noqa: A002
     **extra: str,
 ) -> str:
-    code_history = _get_code_history(session, code)
-    type_check_errors = _check_types(code_history, session, returncode, **extra)
-    if type_check_errors:
-        return type_check_errors
+    # code_history = _get_code_history(session, code)
+    # type_check_errors = _check_types(code_history, session, returncode, **extra)
+    # if type_check_errors:
+    #     return type_check_errors
     start_kernel_kwargs = {
-      "env": {**os.environ, "NO_COLOR": "1"},
-      "extra_arguments": ["--quiet"],
+        "env": {**os.environ, "NO_COLOR": "1", "NODE_OPTIONS": "--no-deprecation"},
+        "extra_arguments": [],
     }
     return _run_jupyter(
         "typescript", start_kernel_kwargs, code, returncode, session, id, **extra,

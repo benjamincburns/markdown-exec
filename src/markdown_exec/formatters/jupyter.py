@@ -179,9 +179,9 @@ def _run_jupyter(
             if shell_msg["parent_header"].get("msg_id") == msg_id:
                 execution_completed = True
 
-                if shell_msg["content"]["status"] == "error":
+                if shell_msg["content"].get("status", None) == "error":
                     if (
-                        shell_msg["content"]["traceback"] is not None
+                        shell_msg.get("traceback", None) is not None
                         and len(shell_msg["content"]["traceback"]) > 0
                     ):
                         if shell_msg["content"]["traceback"][0] == "Stack trace:":
@@ -193,7 +193,7 @@ def _run_jupyter(
                     break
                 # note: abort is deprecated, but some older kernels may still send it
                 # it doesn't send error info, however - so we'll need to populate a fake abort error instead
-                if shell_msg["content"]["status"] == "abort":
+                if shell_msg["content"].get("status", None) == "abort":
                     error_outputs.append("AbortError: Execution aborted")
                     break
         except queue.Empty:

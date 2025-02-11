@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 import traceback
@@ -11,6 +10,8 @@ from functools import partial
 from io import StringIO
 from types import ModuleType
 from typing import Any
+
+from pymdownx.superfences import SuperFencesException
 
 from markdown_exec.formatters._exec_python import exec_python
 from markdown_exec.formatters.base import ExecutionError, base_format
@@ -71,6 +72,8 @@ def _run_python(
     try:
         exec_python(code, code_block_id, exec_globals)
     except Exception as error:
+        if isinstance(error, SuperFencesException):
+            raise
         trace = traceback.TracebackException.from_exception(error)
         for frame in trace.stack:
             if frame.filename.startswith("<code block: "):

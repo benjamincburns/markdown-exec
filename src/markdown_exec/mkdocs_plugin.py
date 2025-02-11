@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 import re
@@ -17,7 +16,7 @@ from mkdocs.utils import write_file
 
 from markdown_exec import formatter, formatters, validator
 from markdown_exec.formatters.jupyter import _shutdown_kernels
-from markdown_exec.hooks import fire_post_session_hooks, hook_formatter
+from markdown_exec.hooks import _import_module_from_cwd, fire_post_session_hooks, hook_formatter
 from markdown_exec.logger import patch_loggers
 from markdown_exec.rendering import MarkdownConverter, markdown_config
 
@@ -34,6 +33,8 @@ except ImportError:
     ansi_ok = False
 else:
     ansi_ok = True
+
+_formatters = dict(formatters)
 
 
 class _LoggerAdapter(logging.LoggerAdapter):
@@ -63,33 +64,33 @@ class Hook(BaseConfigOption[str]):
     def run_validation(self, value: object, /) -> str:
         """Validate the value."""
         if not isinstance(value, str):
-            msg = f"Expected type: str but received: {type(value)}"
-        elif not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*:[a-zA-Z_][a-zA-Z0-9_]*$", value):
-            msg = (
+            raise ValidationError(f"Expected type: str but received: {type(value)}")
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*:[a-zA-Z_][a-zA-Z0-9_]*$", value):
+            raise ValidationError(
                 f"Expected a valid hook definition, got: {value}. Valid hook "
                 "definitions are of the form: "
                 "'module_import_string:function_name' (without quotes). For"
-                "example: 'markdown_exec.hooks:pre_session'"
+                "example: 'markdown_exec.hooks:pre_session'",
             )
-        else:
-            module_name, function_name = value.split(":")
-            module = None
-            try:
-                module = importlib.import_module(module_name)
-            except ImportError:
-                msg = (
-                    f"The module {module_name} could not be imported. Please "
-                    "check the spelling of the module import string."
-                )
-            if module is not None and not hasattr(module, function_name):
-                msg = (
-                    f"The function {function_name} could not be found in the module "
-                    f"{module_name}. Please check the spelling of the function name."
-                )
-            elif module is not None:
-                return cast(str, value)
 
-        raise ValidationError(msg)
+        module_name, function_name = value.split(":")
+        module = None
+        module = _import_module_from_cwd(module_name)
+
+        if module is not None and not hasattr(module, function_name):
+            raise ValidationError(
+                f"The module {module_name} could not be imported. Please "
+                "check the spelling of the module import string.",
+            )
+
+        if module is not None and not hasattr(module, function_name):
+            raise ValidationError(
+                f"The function {function_name} could not be found in the module "
+                f"{module_name}. Please check the spelling of the function name.",
+            )
+
+        return cast(str, value)
+
 
 class LanguageHookConfig(Config):
     """Defines the set of hooks for a language."""
@@ -149,20 +150,20 @@ class MarkdownExecPlugin(BasePlugin[MarkdownExecPluginConfig]):
         for language in self.languages:
             if language not in self.config.hooks:
                 self.config.hooks[language] = LanguageHookConfig()
-            print(f"language: {language}")
             formatters[language] = hook_formatter(
-                formatter=formatters[language],
+                formatter=_formatters[language],
                 language=language,
                 pre_session_hooks=self.config.hooks[language].pre_session,
             )
-            custom_fences.append(
-                {
-                    "name": language,
-                    "class": language,
-                    "validator": validator,
-                    "format": formatter,
-                },
-            )
+            if not any(fence["name"] == language for fence in custom_fences):
+                custom_fences.append(
+                    {
+                        "name": language,
+                        "class": language,
+                        "validator": validator,
+                        "format": formatter,
+                    },
+                )
         markdown_config.save(config.markdown_extensions, config.mdx_configs)
         return config
 

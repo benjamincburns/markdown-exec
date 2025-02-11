@@ -1,13 +1,14 @@
 """Hooks for the `markdown-exec` plugin."""
 import functools
-import importlib
-import json
-import traceback
-from typing import Any, NamedTuple, Protocol, Union, cast
+import os
+import sys
+from importlib.util import module_from_spec, spec_from_file_location
+from types import ModuleType
+from typing import Any, NamedTuple, Protocol, Union
 
 from markupsafe import Markup
 
-from markdown_exec.formatters.base import ExecutionError, Formatter
+from markdown_exec.formatters.base import Formatter
 
 
 class PreSessionHook(Protocol):
@@ -35,12 +36,42 @@ class PostSessionHook(Protocol):
         """Call the hook."""
         ...
 
+def _import_module_from_cwd(module_name: str) -> ModuleType:
+    module_path = os.path.abspath(
+        os.path.join(os.getcwd(), module_name.replace(".", os.sep) + ".py")
+    )
+
+    if not os.path.isfile(module_path):
+        raise FileNotFoundError(f"Module '{module_name}' not found at {module_path}")
+
+    module_dir = os.path.dirname(module_path)
+
+    pop_dir = False
+    # Ensure the module's directory is in sys.path to resolve dependencies
+    if module_dir not in sys.path:
+        pop_dir = True
+        sys.path.insert(0, module_dir)
+
+    try:
+        spec = spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load spec for module '{module_name}' - tried to import from {module_path}")
+
+        module = module_from_spec(spec)
+        sys.modules[module_name] = module  # Register in sys.modules
+        spec.loader.exec_module(module)  # Execute the module
+
+        return module
+    finally:
+        if pop_dir:
+            sys.path.pop(0)
+
 
 @functools.cache
 def _import_hook(resolution_str: str) -> Union[PreSessionHook, PostSessionHook]:
     """Imports a hook function from a string."""
     module_name, function_name = resolution_str.split(":")
-    module = importlib.import_module(module_name)
+    module = _import_module_from_cwd(module_name)
     if not hasattr(module, function_name):
         raise ValueError(f"Function {function_name} not found in module {module_name}")
     return getattr(module, function_name)
@@ -64,22 +95,22 @@ def hook_formatter(
         _formatter_by_language[language] = formatter
 
     def wrapped_formatter(**kwargs: Any) -> Markup:
+        new_kwargs = kwargs.copy()
+        new_kwargs["extra"] = kwargs.get("extra", {}).copy()
         session = kwargs.get("session", "")
-        is_new_session = session == "" and session not in _sessions_by_formatter[formatter]
+
+        is_new_session = session == "" or session not in _sessions_by_formatter[formatter]
+
         if is_new_session:
             if session != "":
               _sessions_by_formatter[formatter].append(session)
+
             for hook in [_import_hook(hook) for hook in pre_session_hooks]:
-                try:
-                    result = hook(formatter=formatter, language=language, **kwargs)
-                    if result is not None:
-                        kwargs.update(result)
-                except Exception as e:
-                    if not isinstance(e, ExecutionError):
-                        raise ExecutionError(traceback.format_exc()) from e
-                    raise
+                result = hook(formatter=formatter, language=language, **dict(new_kwargs))
+                if result is not None:
+                    new_kwargs.update(result)
         try:
-            output = formatter(**kwargs)
+            output = formatter(**new_kwargs)
             if session != "":
                 if formatter not in _session_history:
                     _session_history[formatter] = {}
@@ -87,7 +118,7 @@ def hook_formatter(
                     _session_history[formatter][session] = []
                 _session_history[formatter][session].append(
                     SessionHistoryEntry(
-                        inputs=dict(language=language, **kwargs),
+                        inputs=dict(language=language, **new_kwargs),
                         output=output,
                         error=None,
                     ),
@@ -101,7 +132,7 @@ def hook_formatter(
                     _session_history[formatter][session] = []
                 _session_history[formatter][session].append(
                     SessionHistoryEntry(
-                        inputs=dict(language=language, session=session, **kwargs),
+                        inputs=dict(language=language, session=session, **new_kwargs),
                         output=output,
                         error=e,
                     ),
@@ -127,6 +158,9 @@ def fire_post_session_hooks(
                     session=session,
                     history=_session_history[formatter][session],
                 )
+    _session_history.clear()
+    _sessions_by_formatter.clear()
+    _formatter_by_language.clear()
 
 
 def pre_session_hook(
@@ -140,7 +174,7 @@ def pre_session_hook(
         source_input = kwargs["code"]
         source_output = kwargs["code"]
 
-    def transform_source(code):
+    def transform_source(_code: str) -> tuple[str, str]:
         return (source_input + "\nprint('YOLO!')\n", # this is what executes
                 source_output) # this is what is rendered
 

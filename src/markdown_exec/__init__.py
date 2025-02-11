@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from markdown import Markdown
 
+from pymdownx.superfences import SuperFencesException
+
 from markdown_exec.formatters.base import ExecutionError, default_tabs
 from markdown_exec.formatters.bash import _format_bash
 from markdown_exec.formatters.console import _format_console
@@ -132,8 +134,8 @@ def formatter(
     fmt = formatters.get(language, lambda source, **kwargs: source)
     try:
         return fmt(code=source, md=md, **options)  # type: ignore[operator]
-    except Exception as e:
-        raise ExecutionError(traceback.format_exc()) from e
+    except Exception as error:
+        raise SuperFencesException(traceback.format_exc()) from error
 
 
 falsy_values = {"", "no", "off", "false", "0"}
