@@ -35,7 +35,7 @@ def code_block(language: str, code: str, **options: str) -> str:
     Returns:
         The formatted code block.
     """
-    opts = " ".join(f'{opt_name}="{opt_value}"' for opt_name, opt_value in options.items())
+    opts = " ".join(f'{opt_name}="{opt_value}"' for opt_name, opt_value in options.items() if opt_name not in ["path", "hard_fail"])
     return f"````````{language} {opts}\n{code}\n````````"
 
 

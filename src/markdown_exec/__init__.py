@@ -24,7 +24,7 @@ from markdown_exec.formatters.console import _format_console
 from markdown_exec.formatters.markdown import _format_markdown
 from markdown_exec.formatters.pycon import _format_pycon
 from markdown_exec.formatters.pyodide import _format_pyodide
-from markdown_exec.formatters.python import _format_python
+from markdown_exec.formatters.python import _format_python_jupyter
 from markdown_exec.formatters.sh import _format_sh
 from markdown_exec.formatters.tree import _format_tree
 from markdown_exec.formatters.tscon import _format_tscon
@@ -39,8 +39,8 @@ formatters = {
     "console": _format_console,
     "md": _format_markdown,
     "markdown": _format_markdown,
-    "py": _format_python,
-    "python": _format_python,
+    "py": _format_python_jupyter,
+    "python": _format_python_jupyter,
     "pycon": _format_pycon,
     "pyodide": _format_pyodide,
     "sh": _format_sh,
@@ -134,8 +134,10 @@ def formatter(
     fmt = formatters.get(language, lambda source, **kwargs: source)
     try:
         return fmt(code=source, md=md, **options)  # type: ignore[operator]
-    except Exception as error:
-        raise SuperFencesException(traceback.format_exc()) from error
+    except Exception as e:
+        if isinstance(e, SuperFencesException):
+            raise
+        raise ExecutionError(traceback.format_exc()) from e
 
 
 falsy_values = {"", "no", "off", "false", "0"}

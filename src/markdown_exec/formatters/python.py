@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 import sys
 import traceback
@@ -15,6 +16,7 @@ from pymdownx.superfences import SuperFencesException
 
 from markdown_exec.formatters._exec_python import exec_python
 from markdown_exec.formatters.base import ExecutionError, base_format
+from markdown_exec.formatters.jupyter import _run_jupyter
 from markdown_exec.rendering import code_block
 
 _sessions_globals: dict[str, dict] = defaultdict(dict)
@@ -53,6 +55,7 @@ def _run_python(
     **extra: str,
 ) -> str:
     title = extra.get("title")
+    hard_fail = extra.get("hard_fail", True)
     code_block_id = _code_block_id(id, session, title)
     _code_blocks[code_block_id] = code.split("\n")
     exec_globals = _sessions_globals[session] if session else {}
@@ -74,6 +77,8 @@ def _run_python(
     except Exception as error:
         if isinstance(error, SuperFencesException):
             raise
+        if hard_fail:
+            raise SuperFencesException(traceback.format_exc()) from error
         trace = traceback.TracebackException.from_exception(error)
         for frame in trace.stack:
             if frame.filename.startswith("<code block: "):
@@ -87,3 +92,6 @@ def _run_python(
 
 def _format_python(**kwargs: Any) -> str:
     return base_format(language="python", run=_run_python, **kwargs)
+
+def _format_python_jupyter(**kwargs: Any) -> str:
+    return base_format(language="python", run=functools.partial(_run_jupyter, "python", []), **kwargs)

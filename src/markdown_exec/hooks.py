@@ -78,7 +78,7 @@ def _import_hook(resolution_str: str) -> Union[PreSessionHook, PostSessionHook]:
 
 
 _formatter_by_language: dict[str, Formatter] = {}
-_sessions_by_formatter: dict[Formatter, list[str]] = {}
+_sessions_by_formatter: dict[Formatter, set[str]] = {}
 _session_history: dict[Formatter, dict[str, list[SessionHistoryEntry]]] = {}
 
 
@@ -90,7 +90,7 @@ def hook_formatter(
 ) -> Formatter:
     """Wraps a formatter to support pre- and post-session hooks."""
     if formatter not in _sessions_by_formatter:
-        _sessions_by_formatter[formatter] = []
+        _sessions_by_formatter[formatter] = set()
     if language not in _formatter_by_language:
         _formatter_by_language[language] = formatter
 
@@ -99,11 +99,15 @@ def hook_formatter(
         new_kwargs["extra"] = kwargs.get("extra", {}).copy()
         session = kwargs.get("session", "")
 
-        is_new_session = session == "" or session not in _sessions_by_formatter[formatter]
+        is_new_session = session is None or session == "" or session not in _sessions_by_formatter[formatter]
 
         if is_new_session:
-            if session != "":
-              _sessions_by_formatter[formatter].append(session)
+            if (
+                session is not None
+                and session != ""
+                and session not in _sessions_by_formatter[formatter]
+            ):
+                _sessions_by_formatter[formatter].add(session)
 
             for hook in [_import_hook(hook) for hook in pre_session_hooks]:
                 result = hook(formatter=formatter, language=language, **dict(new_kwargs))
@@ -111,7 +115,7 @@ def hook_formatter(
                     new_kwargs.update(result)
         try:
             output = formatter(**new_kwargs)
-            if session != "":
+            if session is not None and session != "":
                 if formatter not in _session_history:
                     _session_history[formatter] = {}
                 if session not in _session_history[formatter]:
@@ -146,18 +150,31 @@ def fire_post_session_hooks(
     post_session_hooks_by_language: dict[str, list[str]],
 ) -> None:
     """Fires post-session hooks when a session is ended."""
+    fired_hooks_by_formatter = {}
     for language, hook_resolution_strings in post_session_hooks_by_language.items():
+        # haven't had a session for this language
         if language not in _formatter_by_language:
             continue
+
         formatter = _formatter_by_language[language]
-        for session in _sessions_by_formatter.get(formatter, []):
+
+        if formatter not in _sessions_by_formatter:
+            continue
+
+        if formatter not in fired_hooks_by_formatter:
+            fired_hooks_by_formatter[formatter] = set()
+
+        for session in _sessions_by_formatter[formatter]:
             for hook in [_import_hook(hook) for hook in hook_resolution_strings]:
+                if hook in fired_hooks_by_formatter[formatter]:
+                    continue
                 hook(
                     formatter=formatter,
                     language=language,
                     session=session,
                     history=_session_history[formatter][session],
                 )
+                fired_hooks_by_formatter[formatter].add(hook)
     _session_history.clear()
     _sessions_by_formatter.clear()
     _formatter_by_language.clear()
@@ -167,7 +184,6 @@ def pre_session_hook(
     **kwargs: Any,
 ) -> Union[dict[str, Any], None]:
     """Test hook."""
-
     if "transform_source" in kwargs:
         source_input, source_output = kwargs["transform_source"](kwargs["code"])
     else:
