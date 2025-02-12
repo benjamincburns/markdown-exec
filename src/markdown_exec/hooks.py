@@ -99,23 +99,23 @@ def hook_formatter(
         new_kwargs["extra"] = kwargs.get("extra", {}).copy()
         session = kwargs.get("session", "")
 
-        is_new_session = session is None or session == "" or session not in _sessions_by_formatter[formatter]
+        is_new_session = not session or session not in _sessions_by_formatter[formatter]
 
         if is_new_session:
-            if (
-                session is not None
-                and session != ""
-                and session not in _sessions_by_formatter[formatter]
-            ):
+            if session:
                 _sessions_by_formatter[formatter].add(session)
 
             for hook in [_import_hook(hook) for hook in pre_session_hooks]:
                 result = hook(formatter=formatter, language=language, **dict(new_kwargs))
                 if result is not None:
+                    if not isinstance(result, dict):
+                        raise ValueError(
+                            f"Pre-session hook {hook} returned a non-dict. Return value is type {type(result)}"
+                        )
                     new_kwargs.update(result)
         try:
             output = formatter(**new_kwargs)
-            if session is not None and session != "":
+            if session:
                 if formatter not in _session_history:
                     _session_history[formatter] = {}
                 if session not in _session_history[formatter]:
@@ -129,7 +129,7 @@ def hook_formatter(
                 )
             return output  # noqa: TRY300
         except Exception as e:
-            if session != "":
+            if not session:
                 if formatter not in _session_history:
                     _session_history[formatter] = {}
                 if session not in _session_history[formatter]:
