@@ -165,7 +165,7 @@ def _run_jupyter(
 
     kc.wait_for_ready()
     # Send code for execution
-    msg_id = kc.execute(code, store_history=is_named_session)
+    msg_id = kc.execute(code, store_history=is_named_session, allow_stdin=False)
 
     # Collect output
     outputs = []
