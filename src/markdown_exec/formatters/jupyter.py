@@ -106,9 +106,9 @@ def _get_kernel_manager_and_client(
     if key not in _kernel_managers[language]:
         km = KernelManager(kernel_name=kernel_name)
         if start_kernel_kwargs:
-            km.start_kernel(**start_kernel_kwargs)
+            km.start_kernel(**{"env": {**os.environ}, **start_kernel_kwargs})
         else:
-            km.start_kernel()
+            km.start_kernel(env={**os.environ})
         _kernel_managers[language][key] = km
     km = _kernel_managers[language][key]
     if key not in _kernel_clients[language]:
